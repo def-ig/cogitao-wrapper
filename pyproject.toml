@@ -1,0 +1,60 @@
+[project]
+name = "cogitao-wrapper"
+version = "0.1.0"
+description = "A simple wrapper providing a PyTorch Dataset and generator for COGITAO"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+keywords = ["cogitao", "arc", "dataset", "pytorch", "machine-learning"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "arcworld",
+    "torch>=2",
+    "tqdm>=4",
+    "h5py>=3",
+    "matplotlib>=3",
+    "numpy>=1",
+    "pillow>=9",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/def-ig/COGITAO"
+Documentation = "https://github.com/def-ig/cogitao-wrapper"
+Repository = "https://github.com/def-ig/cogitao-wrapper"
+
+[tool.hatchling.build.targets.wheel]
+packages = ["cogitao_wrapper"]
+
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+torchvision = [
+  { index = "pytorch", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+arcworld = { git = "https://github.com/def-ig/COGITAO.git" }
