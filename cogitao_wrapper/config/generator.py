@@ -1,10 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Literal, Optional
-
-from arcworld.transformations.shape_transformations import transformations_dict
-
-# Static typing won't understand this...
-TransformationType = Literal[*transformations_dict.keys().__str__()]
+from typing import List, Optional
 
 
 @dataclass
@@ -33,7 +28,9 @@ class GeneratorConfig:
     upscale_method: str = "nearest"  # 'nearest' or 'bilinear'
 
     # Transformation settings
-    allowed_transformations: Optional[List[str]] = field(default_factory=lambda: ['rotate90'])
+    allowed_transformations: Optional[List[str]] = field(
+        default_factory=lambda: ["rotate90"]
+    )
     allowed_combinations: Optional[List[List[str]]] = None
 
     # Visualization and inspection

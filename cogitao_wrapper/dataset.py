@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import Dict, Optional
 
 import h5py
 import matplotlib.pyplot as plt
@@ -7,27 +7,18 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-if TYPE_CHECKING:
-    from .config.generator import GeneratorConfig
-else:
-    GeneratorConfig = Any  # type: ignore[assignment]
-
 
 class HDF5CogitaoStore:
     """HDF5-based persistent storage for pre-generated training samples."""
 
-    def __init__(self, path: str, generator_config: Dict[str, Any] | None = None):
+    def __init__(self, path: str):
         """Initialize sample store.
 
         Args:
             cache_path: Path to HDF5 store file
-            generator_config: Configuration dict for sample generator
         """
         self.cache_path = Path(path)
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-
-        if generator_config is not None:
-            self.generator_config = generator_config
 
         # Initialize or validate store file
         self._init_cache()
@@ -288,12 +279,11 @@ class CogitaoDataset(Dataset):
     Uses the same loading mechanism as HDF5CogitaoStore to ensure consistency.
     """
 
-    def __init__(self, path: str, generator_config: Optional[Dict[str, Any]] = None):
+    def __init__(self, path: str):
         """Initialize dataset from store file.
 
         Args:
             path: Path to HDF5 store file
-            generator_config: Optional generator config. If None, will use config from file; used for validation and loading only. Ignore for now unless required
         """
         super(CogitaoDataset, self).__init__()
         self.path = Path(path)
@@ -301,12 +291,8 @@ class CogitaoDataset(Dataset):
         if not self.path.exists():
             raise FileNotFoundError(f"Dataset file not found: {path}")
 
-        # Use minimal config if none provided (for loading only)
-        if generator_config is None:
-            generator_config = {}
-
         # Initialize store - this validates the file and provides the loading interface
-        self.store = HDF5CogitaoStore(path=str(path), generator_config=generator_config)
+        self.store = HDF5CogitaoStore(path=str(path))
 
     def __len__(self) -> int:
         return len(self.store)
