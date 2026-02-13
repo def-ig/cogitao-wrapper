@@ -13,7 +13,7 @@ import time
 from dataclasses import asdict, is_dataclass
 from logging import getLogger
 from queue import Full as QueueFull
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from arcworld.general_utils import generate_key
@@ -85,6 +85,7 @@ def _sample_generation_worker(
 
     failures = 0
     max_consecutive_failures = 50
+
     while True:
         try:
             # Generate task and convert to image
@@ -178,23 +179,21 @@ class TaskGenerator:
         Returns:
             Validated root generator config dict
         """
-        gen_config = {
-            "min_n_shapes_per_grid": cfg.min_n_shapes,
-            "max_n_shapes_per_grid": cfg.max_n_shapes,
-            "n_examples": cfg.n_examples,
-            "min_grid_size": cfg.grid_size,
-            "max_grid_size": cfg.grid_size,
-            "allowed_transformations": cfg.allowed_transformations,
-            "min_transformation_depth": cfg.min_transformation_depth,
-            "max_transformation_depth": cfg.max_transformation_depth,
-            "shape_compulsory_conditionals": [
+        return ConfigValidator(
+            min_n_shapes_per_grid=cfg.min_n_shapes,
+            max_n_shapes_per_grid=cfg.max_n_shapes,
+            n_examples=cfg.n_examples,
+            min_grid_size=cfg.grid_size,
+            max_grid_size=cfg.grid_size,
+            allowed_transformations=cfg.allowed_transformations,
+            min_transformation_depth=cfg.min_transformation_depth,
+            max_transformation_depth=cfg.max_transformation_depth,
+            shape_compulsory_conditionals=[
                 f"is_shape_less_than_{cfg.max_shape_size}_rows",
                 f"is_shape_less_than_{cfg.max_shape_size}_cols",
                 "is_shape_fully_connected",
             ],
-            "saving_path": None,
-        }
-        return ConfigValidator.model_validate(gen_config)
+        )
 
     def generate_task(self):
         """
@@ -402,6 +401,7 @@ class DatasetGenerator:
             f"Generating {num_samples} samples to store: {self.cfg.output_file}"
         )
         _logger.info(f"Using {self.cfg.num_workers} worker processes")
+        _logger.info(f"Generation mode: {self.mode}")
 
         # Initialize store (only main process will write to it)
         store = HDF5CogitaoStore(
@@ -444,7 +444,9 @@ class DatasetGenerator:
                         batch.append(sample)
 
                         # Main process writes batch to H5 when full
-                        if len(batch) >= save_batch_size:
+                        if len(batch) >= min(
+                            save_batch_size, num_samples - total_saved
+                        ):  # Fix to save if limit reached
                             store.save_batch(batch)
                             total_saved += len(batch)
                             pbar.update(len(batch))

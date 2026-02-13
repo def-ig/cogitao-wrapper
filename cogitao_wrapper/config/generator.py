@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 
 @dataclass
@@ -25,7 +25,9 @@ class GeneratorConfig:
 
     # Upscaling settings
     image_size: int = 224
-    upscale_method: str = "nearest"  # 'nearest' or 'bilinear'
+    upscale_method: Literal["nearest", "bilinear"] = (
+        "nearest"  # 'nearest' or 'bilinear'
+    )
 
     # Transformation settings
     allowed_transformations: Optional[List[str]] = field(
