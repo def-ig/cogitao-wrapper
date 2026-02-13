@@ -45,16 +45,5 @@ Repository = "https://github.com/def-ig/cogitao-wrapper"
 [tool.hatchling.build.targets.wheel]
 packages = ["cogitao_wrapper"]
 
-[[tool.uv.index]]
-name = "pytorch"
-url = "https://download.pytorch.org/whl/cpu"
-explicit = true
-
 [tool.uv.sources]
-torch = [
-  { index = "pytorch", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
-]
-torchvision = [
-  { index = "pytorch", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
-]
 arcworld = { git = "https://github.com/def-ig/COGITAO.git" }
