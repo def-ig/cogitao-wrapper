@@ -191,7 +191,7 @@ class TaskGenerator:
             shape_compulsory_conditionals=[
                 f"is_shape_less_than_{cfg.max_shape_size}_rows",
                 f"is_shape_less_than_{cfg.max_shape_size}_cols",
-                "is_shape_less_than_2_cell",
+                "is_shape_more_than_2_cell",
                 "is_shape_evenly_colored",
                 "is_shape_fully_connected",
             ],
