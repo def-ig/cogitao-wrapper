@@ -403,7 +403,6 @@ class DatasetGenerator:
             f"Generating {num_samples} samples to store: {self.cfg.output_file}"
         )
         _logger.info(f"Using {self.cfg.num_workers} worker processes")
-        _logger.info(f"Generation mode: {self.mode}")
 
         # Initialize store (only main process will write to it)
         store = HDF5CogitaoStore(
