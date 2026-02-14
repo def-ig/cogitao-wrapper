@@ -130,6 +130,20 @@ class HDF5CogitaoStore:
         """Cleanup: close file handle on deletion."""
         self._close_handle()
 
+    def __getstate__(self):
+        """Prepare object for pickling - exclude file handles."""
+        state = self.__dict__.copy()
+        # Remove unpicklable h5py file handles
+        state['_read_handle'] = None
+        state['_write_handle'] = None
+        state['_pid'] = None
+        return state
+
+    def __setstate__(self, state):
+        """Restore object from pickle - reinitialize handles on demand."""
+        self.__dict__.update(state)
+        # Handles will be reopened on first access via _get_read_handle()/_get_write_handle()
+
     def __len__(self) -> int:
         """Get number of samples currently in store."""
         return self._length
