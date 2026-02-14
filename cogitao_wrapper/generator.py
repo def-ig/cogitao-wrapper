@@ -13,7 +13,7 @@ import time
 from dataclasses import asdict, is_dataclass
 from logging import getLogger
 from queue import Full as QueueFull
-from typing import Any, Literal
+from typing import Any
 
 import numpy as np
 from arcworld.general_utils import generate_key
@@ -32,6 +32,7 @@ except ImportError:
 
 from .config import GeneratorConfig
 from .dataset import HDF5CogitaoStore
+from .img_transform import to_image
 
 try:
     mp.set_start_method("spawn")
@@ -77,9 +78,7 @@ def _sample_generation_worker(
         upscale_method: Upscale method ('nearest' or 'bilinear')
     """
     # Create root generator directly with pre-built config
-    from arcworld.constants import COLORMAP, NORM
     from arcworld.generator import Generator
-    from PIL import Image
 
     gen = Generator(root_gen_config)
 
@@ -92,20 +91,13 @@ def _sample_generation_worker(
             task = gen.generate_single_task()
             input_grid = np.array(task["pairs"][-1]["input"])
 
-            input_image = np.array(COLORMAP(NORM(input_grid)))[:, :, :3]
-
-            # Resize
-            resize_method = (
-                Image.Resampling.NEAREST
-                if upscale_method == "nearest"
-                else Image.Resampling.BILINEAR
+            # Convert grid to image using shared function
+            img_chw = to_image(
+                input_grid,
+                image_size=image_size,
+                upscale_method=upscale_method,
+                output_format="CHW",
             )
-            img_pil = Image.fromarray((input_image * 255).astype(np.uint8))
-            img_resized = img_pil.resize((image_size, image_size), resize_method)
-            img_array = np.array(img_resized).astype(np.float32) / 255.0
-
-            # Convert to CHW format
-            img_chw = np.transpose(img_array, (2, 0, 1))
 
             sample_queue.put(img_chw, timeout=1)
             failures = 0  # Reset on success
@@ -219,26 +211,13 @@ class TaskGenerator:
         task = self.gen.generate_single_task()
         input_grid = np.array(task["pairs"][-1]["input"])  # (H, W)
 
-        # Convert grid to RGB image using colormap
-        from arcworld.constants import COLORMAP, NORM
-        from PIL import Image
-
-        input_image = np.array(COLORMAP(NORM(input_grid)))[:, :, :3]  # HWC format, RGB
-
-        # Resize to configured image size
-        resize_method = (
-            Image.Resampling.NEAREST
-            if self.upscale_method == "nearest"
-            else Image.Resampling.BILINEAR
+        # Convert grid to image using shared function
+        return to_image(
+            input_grid,
+            image_size=self.image_size,
+            upscale_method=self.upscale_method,
+            output_format="CHW",
         )
-        img_pil = Image.fromarray((input_image * 255).astype(np.uint8))
-        img_resized = img_pil.resize((self.image_size, self.image_size), resize_method)
-        img_array = np.array(img_resized).astype(np.float32) / 255.0  # HWC format
-
-        # Convert to CHW format
-        img_chw = np.transpose(img_array, (2, 0, 1))  # (3, image_size, image_size)
-
-        return img_chw
 
     def generate_tasks(self, n_tasks: int | None = None):
         """
@@ -305,12 +284,10 @@ class TaskGenerator:
         Returns:
             tuple: (input_image, output_image) as numpy arrays in HWC format
         """
-        from arcworld.constants import COLORMAP, NORM
-
         input_grid = np.array(task["input"])
         output_grid = np.array(task["output"])
-        input_image = np.array(COLORMAP(NORM(input_grid)))[:, :, :3]  # HWC format, RGB
-        output_image = np.array(COLORMAP(NORM(output_grid)))[:, :, :3]
+        input_image = to_image(input_grid, output_format="HWC")
+        output_image = to_image(output_grid, output_format="HWC")
         return input_image, output_image
 
     def save_image(self, image, filename: str, output_file: str | None = None):

@@ -9,6 +9,6 @@ if not logging.getLogger().hasHandlers():
 from .config import GeneratorConfig
 from .generator import DatasetGenerator
 from .dataset import CogitaoDataset
+from . import img_transform
 
-
-__all__ = ["GeneratorConfig", "DatasetGenerator", "CogitaoDataset"]
+__all__ = ["GeneratorConfig", "DatasetGenerator", "CogitaoDataset", "img_transform"]
