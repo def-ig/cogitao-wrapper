@@ -63,7 +63,7 @@ def _config_to_dict(cfg) -> dict:
 
 
 def _sample_generation_worker(
-    worker_id, sample_queue, root_gen_config, image_size, upscale_method
+    worker_id, sample_queue, root_gen_config, image_size, upscale_method, shutdown_event
 ):
     """Worker process that generates samples and puts them in a shared queue.
 
@@ -76,6 +76,7 @@ def _sample_generation_worker(
         root_gen_config: Pre-built config dict for root Generator (validated)
         image_size: Final image size for resizing
         upscale_method: Upscale method ('nearest' or 'bilinear')
+        shutdown_event: Multiprocessing Event to signal worker shutdown
     """
     # Create root generator directly with pre-built config
     from arcworld.generator import Generator
@@ -85,7 +86,7 @@ def _sample_generation_worker(
     failures = 0
     max_consecutive_failures = 50
 
-    while True:
+    while not shutdown_event.is_set():
         try:
             # Generate task and convert to image
             task = gen.generate_single_task()
@@ -99,6 +100,10 @@ def _sample_generation_worker(
                 output_format="CHW",
             )
 
+            # Check shutdown before blocking put operation
+            if shutdown_event.is_set():
+                break
+                
             sample_queue.put(img_chw, timeout=1)
             failures = 0  # Reset on success
         except QueueFull:
@@ -114,7 +119,11 @@ def _sample_generation_worker(
                 traceback.print_exc()
                 break  # Stop this worker
             continue
-
+    
+    # Ensure queue doesn't block process exit
+    # This allows the process to exit even if queue has buffered items
+    sample_queue.cancel_join_thread()
+    _logger.debug(f"Worker {worker_id} exiting gracefully (failures: {failures})")
 
 class TaskGenerator:
     """Generator wrapper for creating training sample cache.
@@ -356,8 +365,9 @@ class DatasetGenerator:
     def generate(
         self,
         num_samples: int | None = None,
-        buffer_size: int = 1000,
-        save_batch_size: int = 100,
+        *,
+        buffer_size: int | None = None,
+        save_batch_size: int | None = None,
     ):
         """
         Generate samples in parallel and save to HDF5 cache file.
@@ -366,15 +376,25 @@ class DatasetGenerator:
         Only the main process writes to the H5 file to avoid contention.
 
         Args:
-            num_samples: Number of samples to generate. If None, uses cfg.num_tasks
-            buffer_size: Size of the sample buffer queue
-            save_batch_size: Batch size for saving to disk
+            num_samples(int | None = None): Number of samples to generate. If None, uses cfg.num_tasks
+
+        Kwargs:
+            buffer_size(int | None = None): Size of the sample buffer queue. If None, uses num_workers * 16
+            save_batch_size(int | None = None): Batch size for saving to disk. If None, uses num_workers * 8
 
         Returns:
             Path to cache file
         """
         if num_samples is None:
             num_samples = self.cfg.num_tasks
+
+        # Default batch size based on workers
+        if save_batch_size is None:
+            save_batch_size = self.cfg.num_workers * 8
+
+        # Default buffer size for the queue
+        if buffer_size is None:
+            buffer_size = self.cfg.num_workers * 16
 
         _logger.info(
             f"Generating {num_samples} samples to store: {self.cfg.output_file}"
@@ -388,6 +408,9 @@ class DatasetGenerator:
 
         # Create shared queue for all workers to put their samples
         sample_queue = mp.Queue(maxsize=buffer_size)
+        
+        # Create shutdown event for graceful worker termination
+        shutdown_event = mp.Event()
 
         # Start worker processes - they only generate and queue samples
         workers = []
@@ -401,8 +424,8 @@ class DatasetGenerator:
                     self.root_gen_config,
                     self.image_size,
                     self.upscale_method,
+                    shutdown_event,
                 ),
-                daemon=True,
             )
             p.start()
             workers.append(p)
@@ -417,11 +440,10 @@ class DatasetGenerator:
             with tqdm(total=num_samples, desc="Saving to store") as pbar:
                 while total_saved < num_samples:
                     try:
-                        # Get sample from shared queue (workers are adding to this)
                         sample = sample_queue.get(timeout=5.0)
                         batch.append(sample)
 
-                        # Main process writes batch to H5 when full
+                        # Write batch
                         if len(batch) >= min(
                             save_batch_size, num_samples - total_saved
                         ):  # Fix to save if limit reached
@@ -433,14 +455,13 @@ class DatasetGenerator:
                         # Stop if we have enough samples
                         if total_saved >= num_samples:
                             break
-
                     except Exception as e:
                         # Check if workers are still alive
                         alive_workers = sum(1 for w in workers if w.is_alive())
                         if alive_workers == 0:
                             _logger.error("All workers have died!")
                             break
-                        # Timeout is normal if queue is empty, continue
+                        time.sleep(0.1)  # Sleep briefly to avoid busy-wait
                         continue
 
                 # Main process writes remaining samples to H5
@@ -451,11 +472,17 @@ class DatasetGenerator:
                     pbar.update(len(to_save))
 
         finally:
-            # Cleanup workers
+            # Cleanup workers gracefully
             _logger.info("Stopping worker processes...")
-            for w in workers:
-                w.terminate()
-                w.join(timeout=1.0)
+            shutdown_event.set()  # Signal workers to stop
+            
+            # Wait for workers to finish their current task
+            for i, w in enumerate(workers):
+                w.join(timeout=3.0)
+                if w.is_alive():
+                    _logger.warning(f"Worker {i} did not exit within timeout, terminating...")
+                    w.terminate()
+                    w.join(timeout=1.0)
 
             # Drain any remaining items from queue
             try:
@@ -473,6 +500,10 @@ class DatasetGenerator:
                     total_saved += len(to_save)
             except Exception:
                 pass
+            finally:
+                # Properly close the queue
+                sample_queue.close()
+                sample_queue.join_thread()
 
         _logger.info(
             f"Dataset generation complete! Saved {total_saved} samples to {self.cfg.output_file}"
