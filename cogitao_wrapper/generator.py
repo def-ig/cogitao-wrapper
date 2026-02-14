@@ -404,6 +404,7 @@ class DatasetGenerator:
         # Initialize store (only main process will write to it)
         store = HDF5CogitaoStore(
             path=self.cfg.output_file,
+            shape=(3, self.image_size, self.image_size),
         )
 
         # Create shared queue for all workers to put their samples
