@@ -6,7 +6,6 @@ This module provides:
 2. DatasetGenerator: Parallel cache generator using multiple worker processes
 """
 
-import json
 import multiprocessing as mp
 import os
 import time
@@ -103,7 +102,7 @@ def _sample_generation_worker(
             # Check shutdown before blocking put operation
             if shutdown_event.is_set():
                 break
-                
+
             sample_queue.put(img_chw, timeout=1)
             failures = 0  # Reset on success
         except QueueFull:
@@ -119,11 +118,12 @@ def _sample_generation_worker(
                 traceback.print_exc()
                 break  # Stop this worker
             continue
-    
+
     # Ensure queue doesn't block process exit
     # This allows the process to exit even if queue has buffered items
     sample_queue.cancel_join_thread()
     _logger.debug(f"Worker {worker_id} exiting gracefully (failures: {failures})")
+
 
 class TaskGenerator:
     """Generator wrapper for creating training sample cache.
@@ -210,47 +210,6 @@ class TaskGenerator:
             raise ValueError("Generated task is empty")
         return self._format_task(task)
 
-    def generate_task_hw(self) -> np.ndarray:
-        """
-        Generate a single task and return input as image at configured size.
-
-        Returns:
-            np.ndarray: Input image array of shape (3, image_size, image_size)
-        """
-        task = self.gen.generate_single_task()
-        input_grid = np.array(task["pairs"][-1]["input"])  # (H, W)
-
-        # Convert grid to image using shared function
-        return to_image(
-            input_grid,
-            image_size=self.image_size,
-            upscale_method=self.upscale_method,
-            output_format="CHW",
-        )
-
-    def generate_tasks(self, n_tasks: int | None = None):
-        """
-        Generate multiple tasks.
-
-        Args:
-            n_tasks(int | None): Number of tasks to generate. If None, uses cfg.num_tasks
-
-        Returns:
-            list[dict]: List of task dictionaries
-        """
-        if n_tasks is None:
-            n_tasks = self.cfg.num_tasks
-        tasks = []
-        for i in range(n_tasks):
-            try:
-                task = self.generate_task()
-                tasks.append(task)
-                _logger.info(f"Generated {i + 1}/{n_tasks} tasks")
-            except Exception as e:
-                _logger.warning(f"Failed to generate task {i + 1}: {e}")
-                continue
-        return tasks
-
     def _format_task(self, task):
         """Format task to standard output format."""
         task_dict = {
@@ -266,60 +225,6 @@ class TaskGenerator:
             task_dict["demo_output"] = np.int_(task["pairs"][0]["output"]).tolist()
 
         return task_dict
-
-    def save_tasks(self, tasks, filename: str, output_file: str | None = None):
-        """
-        Save tasks to a JSON file.
-
-        Args:
-            tasks: List of task dictionaries
-            output_file: Path to save the JSON file
-        """
-        if output_file is None:
-            output_file = self.output_file
-        os.makedirs(os.path.dirname(output_file), exist_ok=True)
-
-        with open(output_file, "w") as f:
-            json.dump(tasks, f)
-
-        _logger.info(f"Saved {len(tasks)} tasks to {output_file}")
-
-    def to_images(self, task):
-        """
-        Convert task input and output grids to images.
-
-        Args:
-            task: Task dictionary
-        Returns:
-            tuple: (input_image, output_image) as numpy arrays in HWC format
-        """
-        input_grid = np.array(task["input"])
-        output_grid = np.array(task["output"])
-        input_image = to_image(input_grid, output_format="HWC")
-        output_image = to_image(output_grid, output_format="HWC")
-        return input_image, output_image
-
-    def save_image(self, image, filename: str, output_file: str | None = None):
-        """
-        Save an image array to a file.
-
-        Args:
-            image: Numpy array of the image in HWC format, values in [0, 1]
-        """
-        if output_file is None:
-            output_file = self.output_file
-        os.makedirs(os.path.dirname(output_file), exist_ok=True)
-        path = os.path.join(os.path.dirname(output_file), filename)
-        from PIL import Image
-
-        # Ensure it's in HWC format
-        if image.ndim == 3 and image.shape[0] == 3:
-            # Convert CHW to HWC
-            image = np.transpose(image, (1, 2, 0))
-
-        img = Image.fromarray((image * 255).astype(np.uint8))
-        img.save(path)
-        _logger.info(f"Saved image to {path}")
 
 
 class DatasetGenerator:
@@ -405,11 +310,12 @@ class DatasetGenerator:
         store = HDF5CogitaoStore(
             path=self.cfg.output_file,
             shape=(3, self.image_size, self.image_size),
+            batch_size=self.cfg.batch_size,
         )
 
         # Create shared queue for all workers to put their samples
         sample_queue = mp.Queue(maxsize=buffer_size)
-        
+
         # Create shutdown event for graceful worker termination
         shutdown_event = mp.Event()
 
@@ -476,12 +382,14 @@ class DatasetGenerator:
             # Cleanup workers gracefully
             _logger.info("Stopping worker processes...")
             shutdown_event.set()  # Signal workers to stop
-            
+
             # Wait for workers to finish their current task
             for i, w in enumerate(workers):
                 w.join(timeout=3.0)
                 if w.is_alive():
-                    _logger.warning(f"Worker {i} did not exit within timeout, terminating...")
+                    _logger.warning(
+                        f"Worker {i} did not exit within timeout, terminating..."
+                    )
                     w.terminate()
                     w.join(timeout=1.0)
 

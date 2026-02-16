@@ -12,6 +12,7 @@ class GeneratorConfig:
 
     # Output settings
     output_file: str = "./data/dataset_train.h5"
+    batch_size: int = 32
 
     # Grid configuration
     grid_size: int = 32

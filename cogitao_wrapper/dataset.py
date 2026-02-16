@@ -16,12 +16,18 @@ class HDF5CogitaoStore:
     Supports incremental batch writing to build up the dataset.
     """
 
-    def __init__(self, path: str, shape: Optional[tuple[int, int, int]] = None):
+    def __init__(
+        self,
+        path: str,
+        shape: Optional[tuple[int, int, int]] = None,
+        batch_size: Optional[int] = None,
+    ):
         """Initialize sample store.
 
         Args:
             path: Path to HDF5 store file
             shape: (C, H, W) shape for samples. Required only when creating new store.
+            batch_size: Optional batch size to store as metadata
         """
         self.cache_path = Path(path)
 
@@ -31,6 +37,7 @@ class HDF5CogitaoStore:
         self._pid = None  # Track process ID to detect forks
         self._length = 0  # Track number of samples in store
         self._shape = shape  # (C, H, W)
+        self.batch_size = batch_size
 
         # Initialize or open existing store file
         if not self.cache_path.exists():
@@ -38,7 +45,7 @@ class HDF5CogitaoStore:
                 raise ValueError(
                     "shape (C, H, W) is required when creating a new store file"
                 )
-            self._create_h5(shape)
+            self._create_h5(shape, batch_size)
 
         # Get dataset info from file
         handle = self._get_read_handle()
@@ -49,11 +56,15 @@ class HDF5CogitaoStore:
         self._length = handle["imgs"].shape[0]
         self._shape = tuple(handle["imgs"].shape[1:])  # (C, H, W)
 
-    def _create_h5(self, shape: tuple[int, int, int]):
+        if "batch_size" in handle.attrs:
+            self.batch_size = int(handle.attrs["batch_size"])
+
+    def _create_h5(self, shape: tuple[int, int, int], batch_size: Optional[int] = None):
         """Initialize store file with resizable dataset for incremental writing.
 
         Args:
             shape: (C, H, W) shape for samples
+            batch_size: Optional batch size to store as metadata
         """
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
         C, H, W = shape
@@ -63,22 +74,24 @@ class HDF5CogitaoStore:
                 "imgs",
                 shape=(0, C, H, W),
                 maxshape=(None, C, H, W),  # Resizable along first dimension
-                chunks=(1, C, H, W),  # One sample per chunk
+                chunks=(batch_size, C, H, W),  # One sample per chunk
                 dtype="float32",
                 compression=None,  # No compression for speed
             )
+            if batch_size is not None:
+                f.attrs["batch_size"] = batch_size
         print(f"Created new optimized sample store at {self.cache_path}")
         print(f"  Sample shape: {shape}")
 
     def _get_read_handle(self):
-        """Get persistent read handle with SWMR mode.
+        """Get persistent read handle.
 
         Opens a new handle if:
         - No handle exists yet
         - We're in a different process (after fork)
 
         Returns:
-            h5py.File handle opened in SWMR read mode
+            h5py.File handle
         """
         current_pid = os.getpid()
 
@@ -95,10 +108,7 @@ class HDF5CogitaoStore:
                     pass
                 self._write_handle = None
 
-            # Open with SWMR mode for concurrent reads
-            self._read_handle = h5py.File(
-                self.cache_path, "r", libver="latest", swmr=True
-            )
+            self._read_handle = h5py.File(self.cache_path, "r", libver="latest")
             self._pid = current_pid
 
         return self._read_handle
@@ -111,7 +121,7 @@ class HDF5CogitaoStore:
         - We're in a different process (after fork)
 
         Returns:
-            h5py.File handle opened in append mode (without SWMR)
+            h5py.File handle opened in append mode
         """
         current_pid = os.getpid()
 
@@ -128,7 +138,6 @@ class HDF5CogitaoStore:
                     pass
                 self._read_handle = None
 
-            # Open in append mode without SWMR (allows attribute updates)
             self._write_handle = h5py.File(self.cache_path, "a", libver="latest")
             self._pid = current_pid
 
@@ -185,59 +194,66 @@ class HDF5CogitaoStore:
         Returns:
             Sample array [C, H, W] or None if not found
         """
-        return self.load_sample(idx)
+        return self.load_batch([idx])[0]
 
-    def load_sample(self, idx: int) -> Optional[np.ndarray]:
-        """Load a sample from store by index using persistent handle.
-
-        Args:
-            idx: Sample index
-
-        Returns:
-            Sample array [C, H, W] or None if not found
-        """
-        try:
-            f = self._get_read_handle()
-            if idx < 0 or idx >= self._length:
-                return None
-            # Direct indexing into contiguous dataset - fast!
-            return f["imgs"][idx]  # type: ignore[return-value]
-        except Exception:
-            return None
-
-    def save_sample(self, sample: np.ndarray, idx: Optional[int] = None) -> int:
-        """Save a single sample to store.
-
-        For efficiency, prefer save_batch() for multiple samples.
+    def __getitems__(self, idxs: list[int]) -> list[Optional[np.ndarray]]:
+        """Load multiple samples from store by index using persistent handle.
 
         Args:
-            sample: Sample array [C, H, W]
-            idx: Optional index. If None, appends to end
+            idxs: List of sample indices
 
         Returns:
-            Index where sample was saved
-        """
-        # Use save_batch for consistency
-        indices = self.save_batch([sample], start_idx=idx)
-        return indices[0]
+            List of sample arrays [C, H, W] or None if not found
+            idxs: List of sample indices. Must be valid and within bounds.
 
-    def load_batch(self, indices: list[int]) -> list[Optional[np.ndarray]]:
-        """Load multiple samples efficiently using persistent handle.
+        Returns:
+            List of sample arrays [C, H, W]
+        """
+        return self.load_batch(idxs).tolist()
+
+    def load_batch(self, indices: list[int]) -> np.ndarray:
+        """Read a batch of samples using efficient fancy indexing.
+
+        Indices MUST be valid and within bounds.
 
         Args:
-            indices: List of sample indices
+           indices: List of indices to read
 
         Returns:
-            List of samples (or None for missing samples)
+           Numpy array of shape [B, C, H, W]
         """
-        samples = []
         f = self._get_read_handle()
-        for idx in indices:
-            if 0 <= idx < self._length:
-                samples.append(f["imgs"][idx])
-            else:
-                samples.append(None)
-        return samples
+
+        # h5py fancy indexing requires sorted indices for best performance and compatibility
+        # But we can just try direct indexing first if we trust h5py
+        # Actually, h5py requires indices to be strictly increasing?
+        # "Selection lists must be in increasing order" - older h5py.
+        # Let's sort to be safe and efficient.
+
+        indices = np.array(indices)
+        sorted_idx_args = np.argsort(indices)
+        sorted_indices = indices[sorted_idx_args]
+
+        if sorted_indices[0] < 0 or sorted_indices[-1] >= self._length:
+            raise IndexError("Index range out of bounds")
+
+        # Read sorted
+        # Handle duplicate indices if any? standard h5py selection doesn't support duplicates in selection list usually
+        # But let's assume unique for typical DataLoader batches?
+        # Actually DataLoader with replacement=True can yield duplicates.
+
+        # Robust implementation: unique sorted
+        unique_sorted, inverse_map = np.unique(indices, return_inverse=True)
+
+        if len(unique_sorted) == 0:
+            # Return empty array with correct shape (0, C, H, W)
+            return np.zeros((0,) + self._shape, dtype="float32")
+
+        # Read
+        batch_data = f["imgs"][unique_sorted]
+
+        # reconstruct original order (handle duplicates too)
+        return batch_data[inverse_map]
 
     def save_batch(
         self, samples: list[np.ndarray], start_idx: Optional[int] = None
@@ -311,6 +327,9 @@ class HDF5CogitaoStore:
             print(f"  Dtype: {dset.dtype}")
             print(f"  Chunks: {dset.chunks}")
             print(f"  Compression: {dset.compression}")
+
+            if self.batch_size is not None:
+                print(f"  Batch size: {self.batch_size}")
             print()
 
             print(f"Total samples: {self._length}")
@@ -418,36 +437,10 @@ class CogitaoDataset(Dataset):
         if not self.path.exists():
             raise FileNotFoundError(f"Dataset file not found: {path}")
 
-        # File handle management (process-safe)
-        self._file_handle = None
-        self._pid = None
-
         # Get dataset info and validate format
-        with h5py.File(self.path, "r", swmr=True) as f:
-            if "imgs" not in f:
-                raise ValueError(
-                    f"File {path} doesn't have 'imgs' dataset. "
-                    "This appears to be the old format (samples/N structure). "
-                    "Please convert your dataset to the optimized format."
-                )
-            self._length = f["imgs"].shape[0]
-            self._shape = f["imgs"].shape[1:]  # (C, H, W)
-
-    def _get_file_handle(self):
-        """Get persistent file handle (process-safe for DataLoader workers)."""
-        current_pid = os.getpid()
-
-        # Reopen handle if we forked to a new process
-        if self._pid != current_pid:
-            if self._file_handle is not None:
-                try:
-                    self._file_handle.close()
-                except Exception:
-                    pass
-            self._file_handle = h5py.File(self.path, "r", swmr=True)
-            self._pid = current_pid
-
-        return self._file_handle
+        self.h5df_store = HDF5CogitaoStore(path)
+        self._length = self.h5df_store._length
+        self._shape = self.h5df_store._shape
 
     def __len__(self) -> int:
         return self._length
@@ -461,32 +454,49 @@ class CogitaoDataset(Dataset):
         Returns:
             Dictionary with 'imgs' key containing sample tensor [C, H, W]
         """
-        if idx < 0 or idx >= self._length:
-            raise IndexError(f"Index {idx} out of range [0, {self._length})")
-
-        # Get file handle (reopens if needed after fork)
-        f = self._get_file_handle()
 
         # Direct array indexing - fast!
-        sample = f["imgs"][idx]
+        sample = self.h5df_store[idx]
 
         # Convert to tensor
         tensor = torch.from_numpy(sample).float()
         return {"imgs": tensor}
 
-    def __del__(self):
-        """Cleanup file handle."""
-        if self._file_handle is not None:
-            try:
-                self._file_handle.close()
-            except Exception:
-                pass
+    def __getitems__(self, idxs: list[int]) -> list[Dict[str, torch.Tensor]]:
+        """Load multiple samples from dataset efficiently.
+
+        This method is called by DataLoader when batch_sampler is used or
+        when fetching a batch of indices.
+
+        Args:
+            idxs: List of sample indices
+
+        Returns:
+            List of dictionaries with 'imgs' key
+        """
+        # Retrieve all samples at once efficiently
+        if len(idxs) <= 0:
+            return []
+
+        # Use improved read_batch for speed
+        try:
+            # load_batch returns [N, C, H, W]
+            batch_arr = self.h5df_store.load_batch(idxs)
+
+            # Convert to list of dicts
+            results = []
+            for sample in batch_arr:
+                results.append({"imgs": torch.from_numpy(sample).float()})
+            return results
+
+        except Exception as e:
+            print(f"Error in batch reading: {e}")
+            # Fallback to individual reading using new load_batch
+            return []
 
     def __getstate__(self):
         """Prepare for pickling (DataLoader multiprocessing)."""
         state = self.__dict__.copy()
-        state["_file_handle"] = None
-        state["_pid"] = None
         return state
 
     def __setstate__(self, state):
