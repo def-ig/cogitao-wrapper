@@ -61,27 +61,40 @@ def to_state(
 
     Args:
         image: Input image as numpy array. Expected to be float32 in range [0, 1].
-               Shape should be (3, H, W) if input_format='CHW',
-               or (H, W, 3) if input_format='HWC'.
+               Shape should be (3, H, W) or (B, 3, H, W) if input_format='CHW',
+               or (H, W, 3) or (B, H, W, 3) if input_format='HWC'.
         original_size: Optional original grid size for downscaling. If None, no downscaling is performed.
         downscale_method: Method for downscaling - 'nearest' or 'bilinear'
         input_format: Input format - 'HWC' (height, width, channels) or 'CHW' (channels, height, width)
 
     Returns:
-        Grid array of shape (H, W) with integer values in range [0, 9].
+        Grid array of shape (H, W) or (B, H, W) with integer values in range [0, 9].
     """
     # Build color lookup table (10 colors x 3 channels)
     # ARC grids have values 0-9
+
+    batch_size: int | None = (
+        None  # Setting to None since we can technically have (1, C, H, W) input...
+    )
     color_palette = np.zeros((10, 3), dtype=np.float64)
     for i in range(10):
         test_grid = np.array([[i]])
         color_palette[i] = np.array(COLORMAP(NORM(test_grid)))[:, :, :3][0, 0]
 
     # Convert to HWC format if needed
-    if input_format == "CHW":
-        img_hwc = np.transpose(image, (1, 2, 0))
+    if image.ndim == 4:
+        if input_format == "CHW":
+            # (B, C, H, W) -> (B, H, W, C)
+            img_hwc = np.transpose(image, (0, 2, 3, 1))
+        else:
+            img_hwc = image
+        batch_size, height, width = img_hwc.shape[:3]
     else:
-        img_hwc = image
+        if input_format == "CHW":
+            img_hwc = np.transpose(image, (1, 2, 0))
+        else:
+            img_hwc = image
+        height, width = img_hwc.shape[:2]
 
     # Downscale if requested
     if original_size is not None:
@@ -90,24 +103,45 @@ def to_state(
             if downscale_method == "nearest"
             else Image.Resampling.BILINEAR
         )
-        img_pil = Image.fromarray((img_hwc * 255).astype(np.uint8))
-        img_downscaled = img_pil.resize(
-            (original_size, original_size), downscale_method_pil
-        )
-        img_hwc = np.array(img_downscaled).astype(np.float32) / 255.0
+        if batch_size is not None:
+            # Process each image in batch
+            # This is slow but PIL doesn't support batches
+            imgs_downscaled = []
+            for i in range(batch_size):
+                img_pil = Image.fromarray((img_hwc[i] * 255).astype(np.uint8))
+                img_downscaled = img_pil.resize(
+                    (original_size, original_size), downscale_method_pil
+                )
+                imgs_downscaled.append(np.array(img_downscaled))
+            img_hwc = np.stack(imgs_downscaled).astype(np.float32) / 255.0
+            height, width = original_size, original_size
+        else:
+            img_pil = Image.fromarray((img_hwc * 255).astype(np.uint8))
+            img_downscaled = img_pil.resize(
+                (original_size, original_size), downscale_method_pil
+            )
+            img_hwc = np.array(img_downscaled).astype(np.float32) / 255.0
+            height, width = original_size, original_size
 
     # Vectorized conversion: find closest color for all pixels using argmin
-    # Reshape image to (H*W, 3) for efficient computation
-    height, width = img_hwc.shape[:2]
-    pixels = img_hwc.reshape(-1, 3)  # (H*W, 3)
+    # Reshape image to (N, 3) for efficient computation
+    # where N = H*W or B*H*W
+    pixels = img_hwc.reshape(-1, 3)
 
     # Compute squared Euclidean distance between each pixel and each color
-    # Broadcasting: (H*W, 1, 3) - (1, 10, 3) = (H*W, 10, 3)
+    # Broadcasting: (N, 1, 3) - (1, 10, 3) = (N, 10, 3)
     distances = np.sum(
         (pixels[:, np.newaxis, :] - color_palette[np.newaxis, :, :]) ** 2, axis=2
     )
 
     # Find the index of the closest color for each pixel using argmin
-    grid = np.argmin(distances, axis=1).reshape(height, width).astype(np.int32)
+    if batch_size is not None:
+        grid = (
+            np.argmin(distances, axis=1)
+            .reshape(batch_size, height, width)
+            .astype(np.int32)
+        )
+    else:
+        grid = np.argmin(distances, axis=1).reshape(height, width).astype(np.int32)
 
     return grid
