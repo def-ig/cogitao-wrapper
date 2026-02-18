@@ -47,3 +47,10 @@ packages = ["cogitao_wrapper"]
 
 [tool.uv.sources]
 arcworld = { git = "https://github.com/def-ig/COGITAO.git" }
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q"
+testpaths = [
+    "tests",
+]
