@@ -3,22 +3,31 @@ import numpy as np
 from .img_transform import to_state
 
 
-def per_pixel_accuracy(preds: np.ndarray, targets: np.ndarray) -> float:
+def per_pixel_accuracy(
+    targets: np.ndarray,
+    preds: np.ndarray,
+) -> float:
     """
-    Compares pixels of two image arrays
-    preds: (B, C, H, W)
-    targets: (B, C, H, W)
+    Accuracy of grid recreation from two image arrays.
+
+    targets: (B, C, H, W) target images
+    preds: (B, C, H, W) predicted images
     """
-    return float(
-        (preds == targets).mean()
-    )  # Slight color variations will lead to massive inaccuracy...
+    targets_grid = to_state(targets, original_size=targets.shape[-1])
+    preds_grid = to_state(preds, original_size=targets.shape[-1])
+
+    return float((targets_grid == preds_grid).mean())
 
 
-def object_location_accuracy(preds: np.ndarray, targets: np.ndarray) -> float:
+def object_location_accuracy(
+    targets: np.ndarray,
+    preds: np.ndarray,
+) -> float:
     """
-    Compares image to target grid for non-white pixels overlap. Transforms images to cogitao grids first.
-    preds: (B, C, H, W)
-    targets: (B, grid_size, grid_size): Target grid
+    Compares grid of predicted image to target grid using IOU for non-white pixels.
+
+    targets: (B, C, H, W) target images
+    preds: (B, grid_size, grid_size) predicted grids
     """
     preds_grid = to_state(preds, original_size=targets.shape[-1])
 
@@ -26,16 +35,21 @@ def object_location_accuracy(preds: np.ndarray, targets: np.ndarray) -> float:
     preds_mask = preds_grid > 0
     targets_mask = targets > 0
 
-    return float((preds_mask == targets_mask).mean())
+    # Result = IOU for non-white pixels
+    return float((preds_mask & targets_mask).sum() / (preds_mask | targets_mask).sum())
 
 
 def object_location_accuracy_target_image(
-    preds: np.ndarray, targets: np.ndarray, grid_size: int | None = None
+    targets: np.ndarray,
+    preds: np.ndarray,
+    *,
+    grid_size: int | None = None,
 ) -> float:
     """
-    Compares two images for non-white pixels overlap, aka same object pattern. Transforms images to cogitao grids first.
-    preds: (B, C, H, W) image batch
-    targets: (B, C, H, W) image batch
+    Compares grid of predicted image to grid of target image using IOU for non-white pixels.
+
+    targets: (B, C, H, W) target images
+    preds: (B, C, H, W) predicted images
     """
     preds_grid = to_state(preds, original_size=grid_size)
     targets_grid = to_state(targets, original_size=grid_size)
@@ -44,13 +58,16 @@ def object_location_accuracy_target_image(
     preds_mask = preds_grid > 0
     targets_mask = targets_grid > 0
 
-    return float((preds_mask == targets_mask).mean())
+    # Result = IOU for non-white pixels
+    return float((preds_mask & targets_mask).sum() / (preds_mask | targets_mask).sum())
 
 
 def _extract_objects(grid: np.ndarray) -> list[np.ndarray]:
     """
     Extracts connected components of non-zero pixels as separate object grids.
     Each returned grid has the same shape as input, containing one object.
+
+    grid: (H, W) grid
     """
     grid_working = grid.copy()
     objects = []
@@ -92,14 +109,15 @@ def _extract_objects(grid: np.ndarray) -> list[np.ndarray]:
 
 
 def number_of_perfectly_reconstructed_objects(
-    objects: np.ndarray, target: np.ndarray
+    target: np.ndarray,
+    preds: np.ndarray,
 ) -> tuple[int, int, int, int]:
     """
     Checks how many objects were perfectly reconstructed.
 
     Args:
-        objects: (N, C, H, W) images of N objects for one grid OR (C, H, W) single image
         target: (grid_size, grid_size) Resulting grid
+        preds: (N, C, H, W) images of N objects for one grid OR (C, H, W) single image
 
     Returns:
         tuple[int, int, int, int]: (found, duplicates, missed, extra)
@@ -112,14 +130,14 @@ def number_of_perfectly_reconstructed_objects(
     # Convert input to grids
     # If objects is (C, H, W), to_state returns (H, W) -> we need to extract objects from this grid
     # If objects is (N, C, H, W), to_state returns (N, H, W) -> these are already separated objects
-    objects_state = to_state(objects, original_size=target.shape[-1])
+    preds_grids = to_state(preds, original_size=target.shape[-1])
 
-    if objects_state.ndim == 2:
+    if preds_grids.ndim == 2:
         # Single grid (H, W), extract objects
-        found_object_grids = _extract_objects(objects_state)
+        found_object_grids = _extract_objects(preds_grids)
     else:
         # List of grids (N, H, W), assume already separated
-        found_object_grids = [g for g in objects_state]
+        found_object_grids = [g for g in preds_grids]
 
     target_objects_found = [False] * len(target_objects)
 
@@ -127,8 +145,9 @@ def number_of_perfectly_reconstructed_objects(
     duplicates = 0
     missed = 0
 
-    # Compare each object from the grid to all objects in the input
+    # Look if all target objects were found
     for i, target_object in enumerate(target_objects):
+        # Look up for a match in found objects
         for j, found_object in enumerate(found_object_grids):
             if np.array_equal(target_object, found_object):
                 if target_objects_found[i]:
@@ -145,14 +164,15 @@ def number_of_perfectly_reconstructed_objects(
 
 
 def number_of_perfectly_reconstructed_objects_batch(
-    objects: np.ndarray, target: np.ndarray
+    target: np.ndarray,
+    preds: np.ndarray,
 ) -> tuple[int, int, int, int]:
     """
     Checks how many objects were perfectly reconstructed.
 
     Args:
-        objects: (B, N, C, H, W) images of N objects for one grid
         target: (B, grid_size, grid_size) Resulting grid
+        preds: (B, N, C, H, W) images of N objects for one grid
 
     Returns:
         tuple[int, int, int, int]: (found, duplicates, missed, extra)
@@ -163,9 +183,9 @@ def number_of_perfectly_reconstructed_objects_batch(
     missed = 0
     extra = 0
 
-    for i in range(objects.shape[0]):
+    for i in range(target.shape[0]):
         found_i, duplicates_i, missed_i, extra_i = (
-            number_of_perfectly_reconstructed_objects(objects[i], target[i])
+            number_of_perfectly_reconstructed_objects(target[i], preds[i])
         )
         found += found_i
         duplicates += duplicates_i
@@ -176,49 +196,66 @@ def number_of_perfectly_reconstructed_objects_batch(
 
 
 def number_of_perfectly_reconstructed_objects_target_image(
-    preds, targets: np.ndarray, grid_size: int | None = None
+    targets: np.ndarray,
+    preds: np.ndarray,
+    *,
+    grid_size: int | None = None,
 ) -> float:
     """
     Compares two images for non-white pixels overlap, aka same object pattern. Transforms images to cogitao grids first.
-    preds: (B, C, H, W) image batch
-    targets: (B, C, H, W) image batch
+    targets: (C, H, W) image
+    preds: (C, H, W) image
     """
     targets_grid = to_state(targets, original_size=grid_size)
 
-    return number_of_perfectly_reconstructed_objects(preds, targets_grid)
+    return number_of_perfectly_reconstructed_objects(targets_grid, preds)
 
 
 def number_of_perfectly_reconstructed_objects_target_image_batch(
-    preds, targets: np.ndarray, grid_size: int | None = None
+    targets: np.ndarray,
+    preds: np.ndarray,
+    *,
+    grid_size: int | None = None,
 ) -> float:
     """
     Compares two images for non-white pixels overlap, aka same object pattern. Transforms images to cogitao grids first.
-    preds: (B, C, H, W) image batch
     targets: (B, C, H, W) image batch
+    preds: (B, C, H, W) image batch
     """
     targets_grid = to_state(targets, original_size=grid_size)
 
-    return number_of_perfectly_reconstructed_objects_batch(preds, targets_grid)
+    return number_of_perfectly_reconstructed_objects_batch(targets_grid, preds)
 
 
 def compare_reconstruction_images(
-    preds: np.ndarray, targets: np.ndarray, grid_size: int | None = None
+    targets: np.ndarray,
+    preds: np.ndarray,
+    objects: np.ndarray | None = None,
+    *,
+    grid_size: int | None = None,
 ) -> dict[str, float]:
     """
     Returns an aggregate of all metrics for a batch of images.
 
-    preds: (B, C, H, W)
-    targets: (B, C, H, W)
+    targets: (B, C, H, W) target images
+    preds: (B, C, H, W) predicted images
+    objects: (B, N, C, H, W) or (B, C, H, W) objects
     """
-    found, duplicates, missed, extra = (
-        number_of_perfectly_reconstructed_objects_target_image_batch(
-            preds, targets, grid_size
+    if objects:
+        found, duplicates, missed, extra = (
+            number_of_perfectly_reconstructed_objects_batch(targets, objects)
         )
-    )
+    else:
+        found, duplicates, missed, extra = (
+            number_of_perfectly_reconstructed_objects_target_image_batch(targets, preds)
+        )
     return {
-        "per_pixel_accuracy": per_pixel_accuracy(preds, targets),
+        "per_pixel_accuracy": per_pixel_accuracy(
+            targets,
+            preds,
+        ),
         "object_location_accuracy": object_location_accuracy_target_image(
-            preds, targets, grid_size
+            targets, preds, grid_size=grid_size
         ),
         "number_of_perfectly_reconstructed_objects": {
             "found": found,

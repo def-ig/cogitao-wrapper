@@ -28,16 +28,24 @@ def task_generator():
 def test_per_pixel_accuracy():
     batch_size = 4
     image_size = 32
-    preds = np.random.rand(batch_size, 3, image_size, image_size).astype(np.float32)
-    targets = preds.copy()
+
+    # Create valid target grids and preds
+    target_grids = np.zeros((batch_size, image_size, image_size), dtype=np.int32)
+    target_grids[:, :10, :10] = 1  # blue square
+    targets = np.stack([to_image(g) for g in target_grids])
+
+    preds = targets.copy()
 
     # Perfect match
-    acc = per_pixel_accuracy(preds, targets)
+    acc = per_pixel_accuracy(targets, preds)
     assert acc == 1.0
 
-    # Complete mismatch (all different)
-    targets_mismatch = preds + 1.0
-    acc_mismatch = per_pixel_accuracy(preds, targets_mismatch)
+    # Complete mismatch
+    mismatch_grids = np.zeros((batch_size, image_size, image_size), dtype=np.int32)
+    mismatch_grids[:, :, :] = 2  # red image entirely
+    preds_mismatch = np.stack([to_image(g) for g in mismatch_grids])
+
+    acc_mismatch = per_pixel_accuracy(targets, preds_mismatch)
     assert acc_mismatch == 0.0
 
 
@@ -53,7 +61,7 @@ def test_object_location_accuracy_target_image_perfect_match():
     preds = img[np.newaxis, ...]  # (1, 3, 10, 10)
     targets = img[np.newaxis, ...]
 
-    acc = object_location_accuracy_target_image(preds, targets)
+    acc = object_location_accuracy_target_image(targets, preds)
     assert acc == 1.0, f"Expected 1.0 accuracy for perfect match, got {acc}"
 
 
@@ -69,10 +77,10 @@ def test_object_location_accuracy_grid_perfect_match():
     # Keep target as grid
     targets = grid[np.newaxis, ...]  # (1, 10, 10)
 
-    acc = object_location_accuracy(preds, targets)
-    assert (
-        acc == 1.0
-    ), f"Expected 1.0 accuracy for perfect match with grid target, got {acc}"
+    acc = object_location_accuracy(targets, preds)
+    assert acc == 1.0, (
+        f"Expected 1.0 accuracy for perfect match with grid target, got {acc}"
+    )
 
 
 def test_object_location_accuracy_target_image_mismatch():
@@ -90,7 +98,7 @@ def test_object_location_accuracy_target_image_mismatch():
     preds = img1[np.newaxis, ...]
     targets = img2[np.newaxis, ...]
 
-    acc = object_location_accuracy_target_image(preds, targets)
+    acc = object_location_accuracy_target_image(targets, preds)
     # Since masks match perfectly (locations are same), accuracy should be 1.0
     assert acc == 1.0, f"Expected 1.0 accuracy for mask match, got {acc}"
 
@@ -102,8 +110,9 @@ def test_object_location_accuracy_target_image_mismatch():
 
     targets = img3[np.newaxis, ...]
 
-    acc = object_location_accuracy_target_image(preds, targets)
-    expected = 0.82
+    acc = object_location_accuracy_target_image(targets, preds)
+    # expected = 0.82
+    expected = 0.0
     assert np.isclose(acc, expected), f"Expected {expected}, got {acc}"
 
 
@@ -131,8 +140,9 @@ def test_object_location_accuracy_target_image_batch():
     g_mod[2, 2] = 1
     targets[0] = to_image(g_mod)
 
-    acc = object_location_accuracy_target_image(batch, targets)
-    expected = 0.995
+    acc = object_location_accuracy_target_image(targets, batch)
+    # expected = 0.995
+    expected = 1.0 / 3.0
     assert np.isclose(acc, expected), f"Expected {expected}, got {acc}"
 
 
@@ -148,7 +158,7 @@ def test_number_of_perfectly_reconstructed_objects_generated(task_generator):
     reconstructed_img = to_image(target_grid)
 
     found, duplicates, missed, extra = number_of_perfectly_reconstructed_objects(
-        reconstructed_img, target_grid.copy()
+        target_grid.copy(), reconstructed_img
     )
 
     # We don't know exactly how many objects, but we know total should match found
@@ -166,7 +176,7 @@ def test_number_of_perfectly_reconstructed_objects_generated(task_generator):
     # Case 2: Blank prediction
     blank_img = to_image(np.zeros_like(target_grid))
     found, duplicates, missed, extra = number_of_perfectly_reconstructed_objects(
-        blank_img, target_grid.copy()
+        target_grid.copy(), blank_img
     )
     assert found == 0
     assert duplicates == 0
@@ -188,7 +198,7 @@ def test_number_of_perfectly_reconstructed_objects_batch_generated(task_generato
     preds = np.stack([to_image(t) for t in targets])  # (B, 3, H, W)
 
     found, duplicates, missed, extra = number_of_perfectly_reconstructed_objects_batch(
-        preds, targets
+        targets, preds
     )
 
     total_objects = 0
@@ -209,7 +219,7 @@ def test_number_of_perfectly_reconstructed_objects_batch_generated(task_generato
     preds_mixed[1] = to_image(np.zeros_like(targets[1]))
 
     found_m, duplicates_m, missed_m, extra_m = (
-        number_of_perfectly_reconstructed_objects_batch(preds_mixed, targets)
+        number_of_perfectly_reconstructed_objects_batch(targets, preds_mixed)
     )
 
     # Batch 0: Perfect -> found X objects
@@ -231,7 +241,7 @@ def test_image_metrics_smoke_generated(task_generator):
     preds = targets_img  # (B, C, H, W)
 
     # Just ensure it runs and returns dict with reasonable values
-    metrics = compare_reconstruction_images(preds, targets_img)
+    metrics = compare_reconstruction_images(targets_img, preds)
     assert metrics["per_pixel_accuracy"] == 1.0
     assert metrics["object_location_accuracy"] == 1.0
     assert metrics["number_of_perfectly_reconstructed_objects"]["missed"] == 0
@@ -287,7 +297,7 @@ def test_number_of_perfectly_reconstructed_objects_batch_with_slots():
     objects[1, 1] = to_image(g2_2)
 
     found, duplicates, missed, extra = number_of_perfectly_reconstructed_objects_batch(
-        objects, targets
+        targets, objects
     )
 
     # Ex 1: F=2, M=0, E=0
@@ -309,7 +319,7 @@ def test_image_metrics_crash_with_image_input():
     targets = np.random.rand(B, C, H, W).astype(np.float32)  # images
 
     try:
-        metrics = compare_reconstruction_images(preds, targets)
+        metrics = compare_reconstruction_images(targets, preds)
         print("image_metrics computed:", metrics)
     except Exception as e:
         pytest.fail(f"image_metrics crashed with standard image input: {e}")
