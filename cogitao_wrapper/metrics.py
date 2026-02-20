@@ -241,9 +241,11 @@ def compare_reconstruction_images(
     preds: (B, C, H, W) predicted images
     objects: (B, N, C, H, W) or (B, C, H, W) objects
     """
-    if objects:
+    if objects is not None:
         found, duplicates, missed, extra = (
-            number_of_perfectly_reconstructed_objects_batch(targets, objects)
+            number_of_perfectly_reconstructed_objects_target_image_batch(
+                targets, objects
+            )
         )
     else:
         found, duplicates, missed, extra = (
