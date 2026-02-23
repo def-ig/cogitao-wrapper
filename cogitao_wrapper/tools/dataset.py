@@ -2,6 +2,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+import PIL
 import torch
 from arcworld.constants import COLORMAP, NORM
 from torch.utils.data import DataLoader
@@ -93,3 +94,78 @@ def color_analysis(
     plt.tight_layout()
     plt.savefig(output_path)
     print(f"Color analysis saved to {output_path}")
+
+
+def plot_dataset_examples(
+    dataset_path: str | Path, output_path: str | Path, num_images: int = 64
+):
+    """
+    Load a dataset and save a grid of images from it.
+    """
+    dataset = CogitaoDataset(dataset_path)
+    print(f"Dataset '{dataset_path}' has {len(dataset)} items.")
+    dataloader = DataLoader(dataset, num_workers=4, shuffle=True)
+
+    output_file = Path(output_path)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # Collect images
+    images = []
+    num_to_print = min(num_images, len(dataset))
+
+    for batch in dataloader:
+        if len(images) >= num_to_print:
+            break
+        img = batch["imgs"]
+        if not isinstance(img, torch.Tensor):
+            img = torch.tensor(img)
+
+        # Ensure image is [C, H, W]
+        if len(img.shape) == 4:
+            # If multiple images per task, take the first one or flatten
+            img = img[0]
+
+        images.append(img)
+
+    print(f"Collected {len(images)} images.")
+
+    if len(images) > 0:
+        # Stack images into a batch [B, C, H, W]
+        img_batch = torch.stack(images)
+
+        import math
+
+        B, C, H, W = img_batch.shape
+        nrow = math.ceil(math.sqrt(B))
+        ncol = math.ceil(B / nrow)
+
+        if B < nrow * ncol:
+            padding = torch.zeros(
+                (nrow * ncol - B, C, H, W),
+                dtype=img_batch.dtype,
+                device=img_batch.device,
+            )
+            img_batch = torch.cat((img_batch, padding), dim=0)
+
+        # Create grid layout
+        grid = img_batch.view(nrow, ncol, C, H, W)
+        grid = grid.permute(2, 0, 3, 1, 4).contiguous().view(C, nrow * H, ncol * W)
+
+        # Convert to numpy and shape [H_total, W_total, C]
+        image_np = grid.permute(1, 2, 0).numpy()
+
+        # PIL needs uint8 array type
+        if np.issubdtype(image_np.dtype, np.floating):
+            # Scale if maximum is <= 1.0 (some margins for float accuracy)
+            if image_np.max() <= 1.001:
+                image_np = image_np * 255.0
+            image_np = np.clip(image_np, 0, 255).astype(np.uint8)
+
+        if image_np.shape[-1] == 1:
+            image_np = image_np.squeeze(-1)  # For grayscale PIL saving
+
+        # Save as a grid using PIL
+        PIL.Image.fromarray(image_np).save(output_file)
+        print(f"Saved image grid to {output_file}")
+    else:
+        print("No images found to process.")
