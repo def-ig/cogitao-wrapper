@@ -79,7 +79,8 @@ class HDF5CogitaoStore:
                 maxshape=(None, C, H, W),  # Resizable along first dimension
                 chunks=(batch_size, C, H, W),  # One sample per chunk
                 dtype="float32",
-                compression=None,  # No compression for speed
+                # compression=None,  # No compression for speed
+                compression="lzf",
             )
             if batch_size is not None:
                 f.attrs["batch_size"] = batch_size
