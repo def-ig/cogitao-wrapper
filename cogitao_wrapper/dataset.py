@@ -18,7 +18,7 @@ class HDF5CogitaoStore:
 
     def __init__(
         self,
-        path: str,
+        path: str | Path,
         shape: Optional[tuple[int, int, int]] = None,
         batch_size: Optional[int] = None,
     ):
@@ -29,7 +29,10 @@ class HDF5CogitaoStore:
             shape: (C, H, W) shape for samples. Required only when creating new store.
             batch_size: Optional batch size to store as metadata
         """
-        self.path = Path(path)
+        if isinstance(path, str):
+            path = Path(path)
+
+        self.path = path
 
         self._read_handle = None
         self._write_handle = None
@@ -416,14 +419,18 @@ class CogitaoDataset(Dataset):
     Old format (samples/0, samples/1, ...) is NOT supported.
     """
 
-    def __init__(self, path: str):
+    def __init__(self, path: str | Path):
         """Initialize dataset from optimized store file.
 
         Args:
             path: Path to HDF5 store file (optimized format)
         """
         super().__init__()
-        self.path = Path(path)
+
+        if isinstance(path, str):
+            path = Path(path)
+
+        self.path = path
 
         if not self.path.exists():
             raise FileNotFoundError(f"Dataset file not found: {path}")
@@ -464,7 +471,7 @@ class CogitaoDataset(Dataset):
         Returns:
             List of dictionaries with 'imgs' key
         """
-        
+
         if len(idxs) <= 0:
             return []
 
