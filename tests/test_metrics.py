@@ -5,6 +5,7 @@ from cogitao_wrapper.generator import GeneratorConfig, TaskGenerator
 from cogitao_wrapper.img_transform import to_image
 from cogitao_wrapper.metrics import (
     compare_reconstruction_images,
+    non_white_pixel_accuracy,
     number_of_perfectly_reconstructed_objects,
     number_of_perfectly_reconstructed_objects_batch,
     object_location_accuracy,
@@ -23,6 +24,36 @@ def task_generator():
         image_size=32,
     )
     return TaskGenerator(cfg)
+
+
+def test_non_white_pixel_accuracy():
+    batch_size = 2
+    image_size = 10
+
+    # Create target
+    target_grids = np.zeros((batch_size, image_size, image_size), dtype=np.int32)
+    target_grids[0, 2:5, 2:5] = 1  # blue square
+    target_grids[1, 5:8, 5:8] = 2  # red square
+    targets = np.stack([to_image(g) for g in target_grids])
+
+    # Perfect match
+    preds = targets.copy()
+    acc = non_white_pixel_accuracy(targets, preds)
+    assert acc == 1.0
+
+    # Half mismatch: batch 0 is correct, batch 1 is totally wrong
+    mismatch_grids = target_grids.copy()
+    mismatch_grids[1, 5:8, 5:8] = 3  # wrong color
+    preds_half = np.stack([to_image(g) for g in mismatch_grids])
+
+    acc_half = non_white_pixel_accuracy(targets, preds_half)
+    assert np.isclose(acc_half, 0.5)
+
+    # Blank targets
+    blank_targets = np.zeros((batch_size, image_size, image_size), dtype=np.int32)
+    blank_targets_img = np.stack([to_image(g) for g in blank_targets])
+    acc_blank = non_white_pixel_accuracy(blank_targets_img, preds)
+    assert acc_blank == 0.0
 
 
 def test_per_pixel_accuracy():
@@ -243,6 +274,7 @@ def test_image_metrics_smoke_generated(task_generator):
     # Just ensure it runs and returns dict with reasonable values
     metrics = compare_reconstruction_images(targets_img, preds)
     assert metrics["per_pixel_accuracy"] == 1.0
+    assert metrics["non_white_pixel_accuracy"] == 1.0
     assert metrics["object_location_accuracy"] == 1.0
     assert metrics["number_of_perfectly_reconstructed_objects"]["missed"] == 0
 

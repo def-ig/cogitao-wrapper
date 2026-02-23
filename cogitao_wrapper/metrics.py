@@ -3,6 +3,28 @@ import numpy as np
 from .img_transform import to_state
 
 
+def non_white_pixel_accuracy(
+    targets: np.ndarray,
+    preds: np.ndarray,
+    *,
+    grid_size: int | None = None,
+) -> float:
+    """
+    Accuracy of grid recreation for non-white pixels of the target.
+
+    targets: (B, C, H, W) target images
+    preds: (B, C, H, W) predicted images
+    """
+    targets_grid = to_state(targets, original_size=grid_size)
+    preds_grid = to_state(preds, original_size=grid_size)
+
+    mask = targets_grid > 0
+    if not np.any(mask):
+        return 0.0
+
+    return float((targets_grid[mask] == preds_grid[mask]).mean())
+
+
 def per_pixel_accuracy(
     targets: np.ndarray,
     preds: np.ndarray,
@@ -255,6 +277,9 @@ def compare_reconstruction_images(
         "per_pixel_accuracy": per_pixel_accuracy(
             targets,
             preds,
+        ),
+        "non_white_pixel_accuracy": non_white_pixel_accuracy(
+            targets, preds, grid_size=grid_size
         ),
         "object_location_accuracy": object_location_accuracy_target_image(
             targets, preds, grid_size=grid_size
