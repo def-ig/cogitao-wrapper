@@ -73,9 +73,7 @@ def to_state(
     # Build color lookup table (10 colors x 3 channels)
     # ARC grids have values 0-9
 
-    batch_size: int | None = (
-        None  # Setting to None since we can technically have (1, C, H, W) input...
-    )
+    batch_size: int | None = None # None <=> (1, C, H, W)
     color_palette = np.zeros((10, 3), dtype=np.float64)
     for i in range(10):
         test_grid = np.array([[i]])

@@ -26,9 +26,7 @@ class GeneratorConfig:
 
     # Upscaling settings
     image_size: int = 224
-    upscale_method: Literal["nearest", "bilinear"] = (
-        "nearest"  # 'nearest' or 'bilinear'
-    )
+    upscale_method: Literal["nearest", "bilinear"] = "nearest"
 
     # Transformation settings
     allowed_transformations: Optional[List[str]] = field(

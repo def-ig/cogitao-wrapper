@@ -53,7 +53,7 @@ def object_location_accuracy(
     """
     preds_grid = to_state(preds, original_size=targets.shape[-1])
 
-    # Mask non-white pixels: essentially do >0
+    # Mask non-white pixels
     preds_mask = preds_grid > 0
     targets_mask = targets > 0
 
@@ -76,7 +76,7 @@ def object_location_accuracy_target_image(
     preds_grid = to_state(preds, original_size=grid_size)
     targets_grid = to_state(targets, original_size=grid_size)
 
-    # Mask non-white pixels: essentially do >0
+    # Mask non-white pixels
     preds_mask = preds_grid > 0
     targets_mask = targets_grid > 0
 

@@ -7,7 +7,6 @@ This module provides:
 """
 
 import multiprocessing as mp
-import os
 import time
 from dataclasses import asdict, is_dataclass
 from logging import getLogger
@@ -59,6 +58,34 @@ def _config_to_dict(cfg) -> dict:
         raise TypeError(
             f"Config must be a dataclass or OmegaConf DictConfig, got {type(cfg)}"
         )
+
+
+def validate_config(cfg: GeneratorConfig):
+    """Build root generator config from GeneratorConfig.
+
+    Args:
+        cfg: GeneratorConfig instance
+
+    Returns:
+        Validated root generator config dict
+    """
+    return ConfigValidator(
+        min_n_shapes_per_grid=cfg.min_n_shapes,
+        max_n_shapes_per_grid=cfg.max_n_shapes,
+        n_examples=cfg.n_examples,
+        min_grid_size=cfg.grid_size,
+        max_grid_size=cfg.grid_size,
+        allowed_transformations=cfg.allowed_transformations,
+        min_transformation_depth=cfg.min_transformation_depth,
+        max_transformation_depth=cfg.max_transformation_depth,
+        shape_compulsory_conditionals=[
+            f"is_shape_less_than_{cfg.max_shape_size}_rows",
+            f"is_shape_less_than_{cfg.max_shape_size}_cols",
+            "is_shape_more_than_2_cell",
+            "is_shape_evenly_colored",
+            "is_shape_fully_connected",
+        ],
+    )
 
 
 def _sample_generation_worker(
@@ -135,13 +162,12 @@ class TaskGenerator:
     The primary use case is to pre-generate a sample cache for training.
     """
 
-    def __init__(self, cfg: GeneratorConfig, cache_path: str | None = None):
+    def __init__(self, cfg: GeneratorConfig):
         """
         Initialize the task generator.
 
         Args:
             cfg: GeneratorConfig instance with all generation parameters
-            cache_path: Optional path to HDF5 cache file. If None, uses 'data/sample_cache.h5'
         """
         self.cfg = cfg
         self.output_file = cfg.output_file
@@ -149,7 +175,7 @@ class TaskGenerator:
         self.upscale_method = cfg.upscale_method
 
         # Build root generator config from our config
-        self.root_gen_config = self._build_root_config(cfg)
+        self.root_gen_config = validate_config(cfg)
 
         # Initialize the root generator
         self.gen = Generator(self.root_gen_config)
@@ -159,44 +185,6 @@ class TaskGenerator:
         cfg_container = _config_to_dict(cfg)
         if not isinstance(cfg_container, dict):
             raise ValueError("Failed to convert GeneratorConfig to dict")
-
-        self.cache_path = cache_path or "data/sample_cache.h5"
-        self.cache_config = {
-            "grid_size": cfg.grid_size,
-            "min_n_shapes": cfg.min_n_shapes,
-            "max_n_shapes": cfg.max_n_shapes,
-            "max_shape_size": cfg.max_shape_size,
-            "allowed_transformations": cfg_container.get("allowed_transformations", []),
-            "image_size": cfg.image_size,
-        }
-
-    @staticmethod
-    def _build_root_config(cfg: GeneratorConfig):
-        """Build root generator config from GeneratorConfig.
-
-        Args:
-            cfg: GeneratorConfig instance
-
-        Returns:
-            Validated root generator config dict
-        """
-        return ConfigValidator(
-            min_n_shapes_per_grid=cfg.min_n_shapes,
-            max_n_shapes_per_grid=cfg.max_n_shapes,
-            n_examples=cfg.n_examples,
-            min_grid_size=cfg.grid_size,
-            max_grid_size=cfg.grid_size,
-            allowed_transformations=cfg.allowed_transformations,
-            min_transformation_depth=cfg.min_transformation_depth,
-            max_transformation_depth=cfg.max_transformation_depth,
-            shape_compulsory_conditionals=[
-                f"is_shape_less_than_{cfg.max_shape_size}_rows",
-                f"is_shape_less_than_{cfg.max_shape_size}_cols",
-                "is_shape_more_than_2_cell",
-                "is_shape_evenly_colored",
-                "is_shape_fully_connected",
-            ],
-        )
 
     def generate_task(self):
         """
@@ -240,13 +228,11 @@ class DatasetGenerator:
 
         Args:
             cfg: GeneratorConfig instance with all generation parameters
-            cache_path: Optional path to HDF5 cache file. If None, uses 'data/sample_cache.h5'
-            num_workers: Number of parallel worker processes for generation
         """
         self.cfg = cfg
 
         # Build root generator config
-        self.root_gen_config = TaskGenerator._build_root_config(cfg)
+        self.root_gen_config = validate_config(cfg)
 
         # Setup cache config
         # Convert config to dict (supports both dataclass and OmegaConf)
@@ -254,15 +240,6 @@ class DatasetGenerator:
 
         if not isinstance(cfg_container, dict):
             raise ValueError("Failed to convert GeneratorConfig to dict")
-
-        self.cache_config = {
-            "grid_size": cfg.grid_size,
-            "min_n_shapes": cfg.min_n_shapes,
-            "max_n_shapes": cfg.max_n_shapes,
-            "max_shape_size": cfg.max_shape_size,
-            "allowed_transformations": cfg_container.get("allowed_transformations", []),
-            "image_size": cfg.image_size,
-        }
 
         self.image_size = cfg.image_size
         self.upscale_method = cfg.upscale_method

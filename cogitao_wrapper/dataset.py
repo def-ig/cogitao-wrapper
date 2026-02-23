@@ -29,7 +29,7 @@ class HDF5CogitaoStore:
             shape: (C, H, W) shape for samples. Required only when creating new store.
             batch_size: Optional batch size to store as metadata
         """
-        self.cache_path = Path(path)
+        self.path = Path(path)
 
         self._read_handle = None
         self._write_handle = None
@@ -40,7 +40,7 @@ class HDF5CogitaoStore:
         self.batch_size = batch_size
 
         # Initialize or open existing store file
-        if not self.cache_path.exists():
+        if not self.path.exists():
             if shape is None:
                 raise ValueError(
                     "shape (C, H, W) is required when creating a new store file"
@@ -66,9 +66,9 @@ class HDF5CogitaoStore:
             shape: (C, H, W) shape for samples
             batch_size: Optional batch size to store as metadata
         """
-        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         C, H, W = shape
-        with h5py.File(self.cache_path, "w", libver="latest") as f:
+        with h5py.File(self.path, "w", libver="latest") as f:
             # Create resizable dataset starting with 0 samples
             f.create_dataset(
                 "imgs",
@@ -80,7 +80,7 @@ class HDF5CogitaoStore:
             )
             if batch_size is not None:
                 f.attrs["batch_size"] = batch_size
-        print(f"Created new optimized sample store at {self.cache_path}")
+        print(f"Created new optimized sample store at {self.path}")
         print(f"  Sample shape: {shape}")
 
     def _get_read_handle(self):
@@ -95,7 +95,7 @@ class HDF5CogitaoStore:
         """
         current_pid = os.getpid()
 
-        # Forked process protection...
+        # Forked process protection
         if self._pid is not None and self._pid != current_pid:
             self._close_handle()
 
@@ -108,7 +108,7 @@ class HDF5CogitaoStore:
                     pass
                 self._write_handle = None
 
-            self._read_handle = h5py.File(self.cache_path, "r", libver="latest")
+            self._read_handle = h5py.File(self.path, "r", libver="latest")
             self._pid = current_pid
 
         return self._read_handle
@@ -138,7 +138,7 @@ class HDF5CogitaoStore:
                     pass
                 self._read_handle = None
 
-            self._write_handle = h5py.File(self.cache_path, "a", libver="latest")
+            self._write_handle = h5py.File(self.path, "a", libver="latest")
             self._pid = current_pid
 
         return self._write_handle
@@ -224,11 +224,8 @@ class HDF5CogitaoStore:
         """
         f = self._get_read_handle()
 
-        # h5py fancy indexing requires sorted indices for best performance and compatibility
-        # But we can just try direct indexing first if we trust h5py
-        # Actually, h5py requires indices to be strictly increasing?
-        # "Selection lists must be in increasing order" - older h5py.
-        # Let's sort to be safe and efficient.
+        # h5py requires sorted indices for best performance and compatibility.
+        # Sort indices to be safe and efficient.
 
         indices = np.array(indices)
         sorted_idx_args = np.argsort(indices)
@@ -237,22 +234,18 @@ class HDF5CogitaoStore:
         if sorted_indices[0] < 0 or sorted_indices[-1] >= self._length:
             raise IndexError("Index range out of bounds")
 
-        # Read sorted
-        # Handle duplicate indices if any? standard h5py selection doesn't support duplicates in selection list usually
-        # But let's assume unique for typical DataLoader batches?
-        # Actually DataLoader with replacement=True can yield duplicates.
+        # h5py selection doesn't support duplicates in selection list.
+        # Handle duplicate indices, as DataLoader with replacement=True can yield duplicates.
 
-        # Robust implementation: unique sorted
         unique_sorted, inverse_map = np.unique(indices, return_inverse=True)
 
         if len(unique_sorted) == 0:
             # Return empty array with correct shape (0, C, H, W)
             return np.zeros((0,) + self._shape, dtype="float32")
 
-        # Read
         batch_data = f["imgs"][unique_sorted]
 
-        # reconstruct original order (handle duplicates too)
+        # Reconstruct original order and handle duplicates
         return batch_data[inverse_map]
 
     def save_batch(
@@ -309,13 +302,13 @@ class HDF5CogitaoStore:
 
     def inspect(self):
         """Print information about the store."""
-        if not self.cache_path.exists():
-            print(f"Store file not found: {self.cache_path}")
+        if not self.path.exists():
+            print(f"Store file not found: {self.path}")
             return
 
         f = self._get_read_handle()
-        print(f"Store file: {self.cache_path}")
-        print(f"File size: {self.cache_path.stat().st_size / (1024**2):.2f} MB")
+        print(f"Store file: {self.path}")
+        print(f"File size: {self.path.stat().st_size / (1024**2):.2f} MB")
         print("Format: Optimized (contiguous 'imgs' dataset)")
         print()
 
@@ -349,14 +342,12 @@ class HDF5CogitaoStore:
         Args:
             confirm: If True, skip confirmation prompt
         """
-        if not self.cache_path.exists():
-            print(f"Store file not found: {self.cache_path}")
+        if not self.path.exists():
+            print(f"Store file not found: {self.path}")
             return
 
         if not confirm:
-            response = input(
-                f"Are you sure you want to clear {self.cache_path}? (yes/no): "
-            )
+            response = input(f"Are you sure you want to clear {self.path}? (yes/no): ")
             if response.lower() != "yes":
                 print("Cancelled.")
                 return
@@ -365,9 +356,9 @@ class HDF5CogitaoStore:
         self._close_handle()
 
         # Delete the file
-        self.cache_path.unlink(missing_ok=True)
+        self.path.unlink(missing_ok=True)
         self._length = 0
-        print(f"Store cleared: {self.cache_path}")
+        print(f"Store cleared: {self.path}")
 
     def show_examples(self, num_examples: int = 5, output_dir: str = "."):
         """Show example samples from the store.
@@ -376,8 +367,8 @@ class HDF5CogitaoStore:
             num_examples: Number of examples to show
             output_dir: Directory to save the visualization
         """
-        if not self.cache_path.exists():
-            print(f"Store file not found: {self.cache_path}")
+        if not self.path.exists():
+            print(f"Store file not found: {self.path}")
             return
 
         f = self._get_read_handle()
@@ -455,7 +446,6 @@ class CogitaoDataset(Dataset):
             Dictionary with 'imgs' key containing sample tensor [C, H, W]
         """
 
-        # Direct array indexing - fast!
         sample = self.h5df_store[idx]
 
         # Convert to tensor
@@ -474,11 +464,10 @@ class CogitaoDataset(Dataset):
         Returns:
             List of dictionaries with 'imgs' key
         """
-        # Retrieve all samples at once efficiently
+        
         if len(idxs) <= 0:
             return []
 
-        # Use improved read_batch for speed
         try:
             # load_batch returns [N, C, H, W]
             batch_arr = self.h5df_store.load_batch(idxs)
