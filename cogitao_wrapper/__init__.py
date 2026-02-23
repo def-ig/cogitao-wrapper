@@ -6,7 +6,7 @@ if not logging.getLogger().hasHandlers():
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
 
-from . import img_transform, metrics
+from . import img_transform, metrics, tools
 from .config import GeneratorConfig
 from .dataset import CogitaoDataset
 from .generator import DatasetGenerator
@@ -17,4 +17,5 @@ __all__ = [
     "CogitaoDataset",
     "img_transform",
     "metrics",
+    "tools",
 ]
