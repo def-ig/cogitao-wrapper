@@ -84,6 +84,7 @@ def validate_config(cfg: GeneratorConfig):
             "is_shape_more_than_2_cell",
             "is_shape_evenly_colored",
             "is_shape_fully_connected",
+            "is_shape_not_hollow",
         ],
     )
 
