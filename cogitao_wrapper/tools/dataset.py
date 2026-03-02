@@ -101,14 +101,14 @@ def color_analysis(
 
 
 def plot_dataset_examples(
-    dataset_path: str | Path, output_path: str | Path, num_images: int = 64
+    dataset_path: str | Path, output_path: str | Path, num_images: int = 64, shuffle: bool = True
 ):
     """
     Load a dataset and save a grid of images from it.
     """
     dataset = CogitaoDataset(dataset_path)
     print(f"Dataset '{dataset_path}' has {len(dataset)} items.")
-    dataloader = DataLoader(dataset, num_workers=4, shuffle=True)
+    dataloader = DataLoader(dataset, num_workers=4, shuffle=shuffle)
 
     output_file = Path(output_path)
     output_file.parent.mkdir(parents=True, exist_ok=True)
