@@ -12,8 +12,8 @@ from ..dataset import CogitaoDataset
 
 
 def color_analysis(
-    dataset_path: str | Path,
-    batch_size: int = 32,
+    dataset: str | Path | CogitaoDataset,
+    *,
     num_workers: int = 4,
     output_path: str | Path = "color_distribution.png",
 ):
@@ -21,12 +21,16 @@ def color_analysis(
     Analyze the color distribution of the dataset.
 
     Args:
-        dataset_path: Path to the dataset
-        batch_size: Batch size for DataLoader
+        dataset: Path to the dataset or CogitaoDataset instance
         num_workers: Number of workers for DataLoader
         output_path: Path to save the output plot
     """
-    dataset = CogitaoDataset(dataset_path)
+    if isinstance(dataset, str | Path):
+        dataset = CogitaoDataset(dataset)
+    elif isinstance(dataset, CogitaoDataset):
+        pass
+    else:
+        raise TypeError("dataset must be a string, Path, or CogitaoDataset instance")
 
     # Build color palette (10 colors)
     color_palette = np.zeros((10, 3), dtype=np.float64)
@@ -42,7 +46,7 @@ def color_analysis(
 
     # Create DataLoader
     loader = DataLoader(
-        dataset, batch_size=batch_size, num_workers=num_workers, shuffle=False
+        dataset, batch_size=dataset.batch_size, num_workers=num_workers, shuffle=False
     )
 
     color_counts = np.zeros(10, dtype=np.int64)

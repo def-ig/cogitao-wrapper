@@ -428,7 +428,7 @@ class CogitaoDataset(Dataset):
 
         Args:
             path (str | Path): Path to HDF5 store file
-    
+
         Keyword Args:
             max_length (int, optional): Maximum number of samples the dataset exposes.
         """
@@ -514,3 +514,7 @@ class CogitaoDataset(Dataset):
     def __setstate__(self, state):
         """Restore after unpickling."""
         self.__dict__.update(state)
+
+    @property
+    def batch_size(self) -> int:
+        return self.h5df_store.batch_size
