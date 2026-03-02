@@ -414,17 +414,23 @@ class CogitaoDataset(Dataset):
 
     Expects HDF5 structure:
     - imgs: [N, C, H, W] dataset with chunks=(1, C, H, W)
-    - No compression
 
-    This provides 3-5x faster loading than the old format.
-    Old format (samples/0, samples/1, ...) is NOT supported.
+    Args:
+        path (str | Path): Path to HDF5 store file
+
+    Keyword Args:
+        max_length (int, optional): Maximum number of samples the dataset exposes.
     """
 
-    def __init__(self, path: str | Path):
-        """Initialize dataset from optimized store file.
+    def __init__(self, path: str | Path, *, max_length: int = None):
+        """
+        Initialize dataset from optimized store file.
 
         Args:
-            path: Path to HDF5 store file (optimized format)
+            path (str | Path): Path to HDF5 store file
+    
+        Keyword Args:
+            max_length (int, optional): Maximum number of samples the dataset exposes.
         """
         super().__init__()
 
@@ -438,7 +444,16 @@ class CogitaoDataset(Dataset):
 
         # Get dataset info and validate format
         self.h5df_store = HDF5CogitaoStore(path)
-        self._length = self.h5df_store._length
+        if max_length is not None and (
+            not isinstance(max_length, int) or max_length < 0
+        ):
+            raise ValueError("max_length must be a non-negative integer")
+
+        if max_length is None:
+            self._length = self.h5df_store._length
+        else:
+            self._length = min(self.h5df_store._length, max_length)
+
         self._shape = self.h5df_store._shape
 
     def __len__(self) -> int:
