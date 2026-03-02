@@ -38,7 +38,7 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/def-ig/COGITAO"
+Homepage = "https://github.com/yassinetb/COGITAO"
 Documentation = "https://github.com/def-ig/cogitao-wrapper"
 Repository = "https://github.com/def-ig/cogitao-wrapper"
 
@@ -46,7 +46,7 @@ Repository = "https://github.com/def-ig/cogitao-wrapper"
 packages = ["cogitao_wrapper"]
 
 [tool.uv.sources]
-arcworld = { git = "https://github.com/def-ig/COGITAO.git" }
+arcworld = { git = "https://github.com/yassinetb/COGITAO.git" }
 
 [tool.pytest.ini_options]
 minversion = "6.0"
