@@ -34,9 +34,6 @@ class GeneratorConfig:
     )
     allowed_combinations: Optional[List[List[str]]] = None
 
-    # Visualization and inspection
-    n_examples_to_visualize: int = 5
-
     # Advanced settings
     n_examples: int = 1
     min_transformation_depth: int = 0
