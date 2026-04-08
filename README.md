@@ -1,4 +1,4 @@
-#⚠️ DEPRECATION NOTICE
+# DEPRECATION NOTICE⚠️
 
 > [!CAUTION]
 > **This repository is no longer maintained.**
