@@ -1,6 +1,13 @@
-# cogitao-wrapper
+#⚠️ DEPRECATION NOTICE
 
-Built on fork of [COGITAO](https://github.com/yassinetb/COGITAO)
+> [!CAUTION]
+> **This repository is no longer maintained.**
+
+All functionality and code from this wrapper have been merged directly into the core **[yassinetb/COGITAO](https://github.com/yassinetb/COGITAO)** repository. 
+
+Please migrate your projects to use the main repository for the latest features, bug fixes, and support.
+
+# cogitao-wrapper
 
 A PyTorch Dataset and generator wrapper for COGITAO (Compositional Generalization in Task-Oriented Abstraction and Object-based reasoning).
 
